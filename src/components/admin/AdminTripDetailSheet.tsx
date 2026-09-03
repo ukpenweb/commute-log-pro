@@ -24,10 +24,11 @@ import {
   Layers,
   Loader2,
   MapPin,
-  User,
-  Truck,
-  CalendarDays,
+  Route as RouteIcon,
   Shield,
+  Truck,
+  User,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/utils";
@@ -218,6 +219,15 @@ export function AdminTripDetailSheet({ trip, open, onOpenChange, onSessionExpire
                     <p className="mt-1 text-sm font-medium leading-snug">{m.value}</p>
                   </div>
                 ))}
+              </div>
+              <div className="rounded-md border p-3">
+                <p className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                  <RouteIcon className="h-3.5 w-3.5" />
+                  Route type
+                </p>
+                <p className="mt-1 text-sm font-medium leading-snug">
+                  {detail?.routeType || trip?.routeType || "—"}
+                </p>
               </div>
               <div className="rounded-md border p-3">
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">

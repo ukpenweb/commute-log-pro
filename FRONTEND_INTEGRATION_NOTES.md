@@ -1,184 +1,55 @@
-# DeyGo — Backend Changes for Frontend Integration
+# Dey Go — Backend Changes for Frontend Integration (v0.3.0)
 
 > **For:** Frontend / mobile client teams
-> **Backend version:** 0.2.0 (2026-08-12)
-> **Purpose:** Every API/field/terminology change the frontend must adopt, with
-> request/response examples and an action checklist. Existing endpoints and
-> fields remain backward compatible unless explicitly marked.
+> **Backend version:** 0.3.0 (2026-09-03)
+> **Companion to:** [`FRONTEND_INTEGRATION_NOTES.md`](./FRONTEND_INTEGRATION_NOTES.md) (v0.2.0, 2026-08-12).
+> This file covers **only the v0.3.0 changes** on top of v0.2.0:
+> **Route type** (Fixed-Route / Demand-Responsive) and the **updated CSV export
+> columns** (`routes.csv` / `stops.csv`). Existing endpoints and fields remain
+> backward compatible unless explicitly marked.
 
 ---
 
-## 1. TL;DR — What changed
+## 1. TL;DR — What changed in v0.3.0
 
 | Area | Change |
 |------|--------|
-| **Fare** | Now **optional** everywhere. A trip may be uploaded/completed with or without a fare. Do **not** send a fake `0` to satisfy validation. |
-| **Vehicle types** | New selectable paratransit vehicle types with passenger capacity (Small Bus 12, Medium Bus 20, Large Bus 30). |
-| **Trip observations** | New persistent text observations tied to a **specific stop visit** (stop event). Multiple observations per stop allowed. |
-| **Signal Stop** | User-facing terminology changed from **Dwell** → **Signal Stop**. |
-| **Delay Time** | New, **independent** per-stop value. Never combine with Signal Stop. |
-| **End Trip** | Backend now **rejects ending a trip while the vehicle is moving**. |
-| **CSV export** | `travel` column removed from `stops.csv`; `vehicle_type`/`vehicle_capacity` now populated in `routes.csv`. |
-| **Trip status** | Trips carry a lifecycle `status` (`ongoing` / `completed`). |
+| **Route type** | New **Fixed-Route / Demand-Responsive** concept (whether the vehicle runs a fixed route or on demand). |
+| **New picker API** | `GET /api/v1/data/route-types` returns the two options; `POST` adds more. |
+| **Upload** | Trips may send an optional `routeType` code (chosen on the **start page**). |
+| **`routes.csv`** | New columns: `route_type`, `time`, `distance`, `no_of_stops`, `fare`. |
+| **`stops.csv`** | `dwell` is reliably populated (falls back to the signal time) and a new **`is_signal_stop`** column shows `True`/`False`. |
+| **Export paths** | Identical new column layout on BOTH the collector download and the admin download. |
 
 ---
 
 ## 2. New endpoints
 
-### 2.1 End a trip — `POST /api/v1/data/trip/end`
-Completes a trip. **Backend enforces that the vehicle is stationary.** Do not rely
-only on disabling the End Trip button in the UI.
+### 2.1 List route types — `GET /api/v1/data/route-types`
+Fixed-Route / Demand-Responsive route operation types. **Use this to drive the
+route-type picker on the collector's start page** and send the chosen `code` as
+`routeType` on upload.
 
-**Request body:**
-```json
-{
-  "tripId": "trip-abc123",
-  "fare": 2.50,        // optional — a trip may end without a fare (omit or null)
-  "speedMps": 0.0      // current speed m/s; if omitted, backend uses the last uploaded GPS speed
-}
-```
-
-**Valid cases (HTTP 200):**
-```json
-{
-  "tripId": "trip-abc123",
-  "status": "completed",
-  "fare": 2.50,
-  "completedAt": "2026-08-12T10:00:00.000Z",
-  "message": "Trip ended successfully."
-}
-```
-- `fare` omitted + stationary → success, `fare` remains `null` (no default created).
-
-**Invalid cases:**
-- `400` vehicle moving → `{"detail": "Vehicle must be stationary before the trip can be ended."}`
-- `400` movement state unknown (no speed sent and no GPS on record) → `{"detail": "Unable to determine vehicle movement state; provide the current vehicle speed."}`
-- `404` trip not found → `{"detail": "No trip found for trip_id: <id>"}`
-
-> **Frontend:** send the current speed from your GPS/telemetry on every End Trip
-> call and handle the `400` message (e.g. toast "Vehicle must be stationary…").
-
----
-
-### 2.2 Trip detail (clean Route) — `GET /api/v1/data/trips/{trip_id}`
-Returns the Route representation **without any Travel-specific data**.
-
-**Response 200:**
-```json
-{
-  "tripId": "trip-abc123",
-  "origin": "Main Street",
-  "destination": "Market Square",
-  "originDestination": "Main Street -> Market Square",
-  "fare": 2.50,
-  "status": "completed",
-  "vehicleType": "medium_bus",
-  "passengerCapacity": 20,
-  "startedAt": "2026-05-07T13:29:32.888Z",
-  "endedAt": "2026-05-07T13:29:32.888Z",
-  "distanceMeters": 4500,
-  "durationSeconds": 26.8,
-  "regularStopCount": 4,
-  "signalStopCount": 2,
-  "signalStopTime": 8.0,
-  "delayTime": 5.0,
-  "totalBoarding": 12,
-  "totalAlighting": 8
-}
-```
-- `signalStopCount` / `signalStopTime` = the **Signal Stop** concept (was "dwell"/signalized).
-- `delayTime` = independent **Delay Time** (new), summed from per-stop `delaySeconds`.
-
----
-
-### 2.3 Create a stop observation — `POST /api/v1/data/observations`
-Records a text observation at a stop **visit**.
-
-**Request body:**
-```json
-{
-  "tripId": "trip-abc123",
-  "stopId": "stop-001",
-  "stopEventId": 42,            // recommended: the specific stop visit's id
-  "text": "Heavy passenger boarding",
-  "timestamp": "2026-08-12T08:15:00Z"   // optional; defaults to now
-}
-```
-- `stopEventId` is **recommended** — it ties the observation to one specific visit of the stop. Use the stop-event id your app already has.
-- If you only have `stopId`, omit `stopEventId`; the backend resolves the **latest** visit of that stop on the trip.
-
-**Response 201:**
-```json
-{
-  "id": 7,
-  "unit_id": "a1b2c3d4",
-  "tripId": "trip-abc123",
-  "stopId": "stop-001",
-  "stopEventId": 42,
-  "text": "Heavy passenger boarding",
-  "timestamp": "2026-08-12T08:15:00Z",
-  "user_id": 1
-}
-```
-- **Multiple observations for the same stop are fully supported.** The same stop
-  visited 3× can hold 3 separate observations (one per visit). There is **no**
-  unique constraint on trip+stop.
-
-**Error cases:** `422` if neither `stopId` nor `stopEventId` given; `404` if
-`stopEventId` doesn't belong to the trip or no visit resolves.
-
-> **Frontend:** capture and send `stopEventId` (the stop visit/event id) so
-> repeated visits to the same stop keep their observations separate.
-
----
-
-### 2.4 List trip observations — `GET /api/v1/data/trips/{trip_id}/observations`
-Returns all observations for a trip, ordered by timestamp (ascending).
 ```json
 [
-  {
-    "id": 7,
-    "unit_id": "a1b2c3d4",
-    "tripId": "trip-abc123",
-    "stopId": "central-market",
-    "stopEventId": 42,
-    "text": "Heavy passenger boarding",
-    "timestamp": "2026-08-12T08:15:00Z",
-    "user_id": 1
-  }
+  {"id": 1, "code": "fixed_route", "name": "Fixed-Route", "active": true},
+  {"id": 2, "code": "demand_responsive", "name": "Demand-Responsive", "active": true}
 ]
 ```
 
-### 2.5 Delete an observation — `DELETE /api/v1/data/observations/{observation_id}`
-`200` `{"message": "Observation deleted."}` · `404` if not found.
+- `code` is the stable value stored on the trip (`fixed_route` / `demand_responsive`).
+- `name` is the human-readable label to display ("Fixed-Route" / "Demand-Responsive").
+
+### 2.2 Create a route type — `POST /api/v1/data/route-types`
+Body: `{"code": "charter", "name": "Charter"}` → `201`.
 
 ---
 
-### 2.6 List vehicle types — `GET /api/v1/data/vehicle-types`
-Selectable paratransit vehicle types with passenger capacity. **Use this to drive
-your vehicle-type picker.**
-```json
-[
-  {"id": 1, "code": "small_bus", "name": "Small Bus", "capacity": 12, "active": true},
-  {"id": 2, "code": "medium_bus", "name": "Medium Bus", "capacity": 20, "active": true},
-  {"id": 3, "code": "large_bus", "name": "Large Bus", "capacity": 30, "active": true}
-]
-```
+## 3. Changed endpoint — Upload (`POST /api/v1/data/upload`)
 
-### 2.7 Create a vehicle type (admin) — `POST /api/v1/data/vehicle-types`
-Body: `{"code": "mini_van", "name": "Mini Van", "capacity": 8}` → `201`.
-
----
-
-## 3. Changed endpoints (existing, still compatible)
-
-### 3.1 Upload — `POST /api/v1/data/upload`
-Fields now **optional**:
-- `fare` — optional (omit or `null`; no default). Previously defaulted to `0`.
-- `vehicleType` — optional. Use the `code` from `GET /data/vehicle-types`.
-- `passengerCapacity` — optional; **auto-derived** from `vehicleType` if omitted. You may still send it to override.
-- `status` — optional (`"ongoing"` / `"completed"`). If omitted, defaults to `"completed"` when `endedAt` is present (existing behaviour preserved).
-- Per stop: `delaySeconds` — optional, new **Delay Time** value (independent of `dwellSeconds` / signal stop).
+New **optional** top-level field `routeType` (a `code` from
+`GET /data/route-types`). Old uploads that omit it still work — the value is
+stored as empty.
 
 ```json
 [
@@ -194,6 +65,7 @@ Fields now **optional**:
     "endStopId": "stop-004",
     "uploaded": true,
     "vehicleType": "medium_bus",
+    "routeType": "fixed_route",
     "gps": [ { "ts": 1779803669208, "lat": 4.981342, "lng": 8.333408, "accuracy": 150, "speed": 8.5 } ],
     "stops": [
       { "type": "regular", "dwellSeconds": 15, "delaySeconds": 3.0,
@@ -204,61 +76,90 @@ Fields now **optional**:
 ]
 ```
 
-### 3.2 Trip list — `GET /api/v1/data/trips`
-Each item now also includes (new keys, existing ones unchanged):
-```json
-{
-  "tripId": "trip-abc123",
-  "originDestination": "Main Street -> Market Square",
-  "date": "2026-05-07T13:29:32.888Z",
-  "vehicleType": "medium_bus",
-  "passengerCapacity": 20,
-  "status": "completed"
-}
+> **Note:** `routeType` is separate from `vehicleType` (the paratransit vehicle,
+> e.g. `small_bus`). A Fixed-Route vs Demand-Responsive service can be operated
+> by any vehicle type.
+
+---
+
+## 4. CSV export — updated columns
+
+The new column layout applies to **both**:
+- Collector download: `GET /api/v1/data/process/{trip_id}`
+- Admin download: `GET /api/v1/admin/trips/{trip_id}/download`
+
+(An existing legacy difference is untouched: the collector export uses the
+placeholder `unit_id`/`route_id`, while the admin export writes real values. The
+column set is identical.)
+
+### 4.1 `routes.csv`
+
+| Column | Source | Notes |
+|--------|--------|-------|
+| `unit_id` / `route_id` / `route_name` / `route_description` / `field_notes` | existing | unchanged |
+| `vehicle_type` / `vehicle_capacity` | existing | unchanged (v0.2.0 populated them) |
+| `start_capture` / `end_capture` | existing | unchanged |
+| **`route_type`** 🆕 | `routeType` | `fixed_route` / `demand_responsive`; empty when not provided |
+| **`time`** 🆕 | `tripDurationSeconds` | trip duration, seconds (numeric) |
+| **`distance`** 🆕 | `tripDistanceKm` | trip distance, km (numeric) |
+| **`no_of_stops`** 🆕 | `regularStopCount + signalizedStopCount` | total stops (integer) |
+| **`fare`** 🆕 | `fare` | fare amount; empty when the trip had none |
+
+Example header + row:
+
+```csv
+"unit_id","route_id","route_name","route_description","field_notes","vehicle_type","vehicle_capacity","start_capture","end_capture","route_type","time","distance","no_of_stops","fare"
+"a1b2c3d4","trip-abc123","Main Street -> Market Square","","5","medium_bus","20","2026:05:07:13:29:32","2026:05:07:13:29:52","fixed_route","26.785","4.5","3","25.0"
 ```
 
-### 3.3 CSV export — `GET /api/v1/data/process/{trip_id}` (and `.../shapefile`)
-- `stops.csv` — the **`travel` column is removed**.
-- `routes.csv` — `vehicle_type` and `vehicle_capacity` are now **populated** from the trip (previously empty).
+### 4.2 `stops.csv`
+
+| Column | Source | Notes |
+|--------|--------|-------|
+| `unit_id` / `route_id` / `stop_id` / `stop_sequence` / `lat` / `lon` | existing | unchanged |
+| **`dwell`** | `dwellSeconds` | Dwell time, now reliably populated; for **signalized** stops it falls back to `signalDelay` (the signal stop time) when `dwellSeconds` is absent |
+| `arrival_time` / `departure_time` / `board` / `alight` / `notes` | existing | unchanged |
+| **`is_signal_stop`** 🆕 | `stopType` ∈ {`signal`, `signalized`} | `True` / `False` |
+
+Example header + row:
+
+```csv
+"unit_id","route_id","stop_id","stop_sequence","lat","lon","dwell","arrival_time","departure_time","board","alight","notes","is_signal_stop"
+"a1b2c3d4","trip-abc123","stop-002","2","4.981442","8.333508","7.0","2026:05:07:13:29:38","2026:05:07:13:29:38","1","0","","True"
+```
 
 ---
 
-## 4. Terminology & data model notes
+## 5. Data model & terminology notes
 
-| Concept | Before | Now |
-|---------|--------|-----|
-| Signal Stop time (signalized stop dwell) | `dwell` / `signalDelay` | **Signal Stop** — exposed as `signalStopTime`, count `signalStopCount` |
-| Delay Time | (none) | New independent per-stop `delaySeconds`; aggregated as `delayTime` |
-| Fare on completion | effectively required | **Optional** (`null` allowed) |
-| Trip lifecycle | (none) | `status`: `ongoing` / `completed`, plus `completedAt` |
-| Vehicle | none | `vehicleType` (code) + `passengerCapacity` |
-
-**Do NOT** combine Signal Stop and Delay Time into one metric/field — the backend
-stores and returns them separately. Keep internal DB names (`signalDelay`,
-`dwellSeconds`, `stopType` values `signalized`/`signal`) if you see them in raw
-exports — they are unchanged for compatibility; the API exposes the correct
-concept names above.
+- **Route type** lives on the trip summary as `routeType` (code); the display
+  names come from the seeded `route_types` lookup table
+  (`fixed_route` → "Fixed-Route", `demand_responsive` → "Demand-Responsive").
+- **`is_signal_stop`** is derived server-side from the stop's `stopType`
+  (`signal` / `signalized` → `True`, `regular` → `False`). No new client input is
+  required — keep sending `type: "regular"` / `"signal"` on each stop.
+- **Dwell** semantics are unchanged conceptually (time spent at the stop). The
+  export now guarantees the column is present and filled, using the signal stop
+  time as the fallback value for signalized stops.
 
 ---
 
-## 5. Frontend action checklist
+## 6. Frontend action checklist (v0.3.0)
 
-- [ ] **Vehicle picker:** call `GET /api/v1/data/vehicle-types`; display `name` (+ capacity). Send the chosen `code` as `vehicleType` on upload.
-- [ ] **End Trip:** call `POST /api/v1/data/trip/end` with `tripId`, current `speedMps` from GPS, and optional `fare`. Handle `400` (vehicle moving / unknown motion) with the returned message. Fare can be `null`/omitted.
-- [ ] **Fare optional:** remove any hard requirement/fake-`0` fallback for fare on upload and completion.
-- [ ] **Observations:** add text-observation capture at each stop visit; send `stopEventId` (the stop event/visit id) + `text` (+ optional `timestamp`). Support multiple observations per stop. Render via `GET /data/trips/{trip_id}/observations`.
-- [ ] **Signal Stop label:** change UI labels from "Dwell" to "Signal Stop".
-- [ ] **Delay Time:** add a separate per-stop Delay Time input and send it as `delaySeconds` — keep it independent of signal stop/dwell.
-- [ ] **Trip detail/list:** consume new fields `vehicleType`, `passengerCapacity`, `status`, `signalStopCount`, `signalStopTime`, `delayTime` from `GET /data/trips/{trip_id}` and `GET /data/trips`.
-- [ ] **CSV consumers:** note `travel` column removed from `stops.csv`; `vehicle_type`/`vehicle_capacity` now populated in `routes.csv`.
+- [ ] **Route-type picker (start page):** call `GET /api/v1/data/route-types`;
+      display `name`. Send the chosen `code` as `routeType` on upload.
+- [ ] **Upload payload:** include `routeType` (optional) alongside `vehicleType`.
+- [ ] **CSV consumers:** update importers/parsers for `routes.csv`
+      (`route_type`, `time`, `distance`, `no_of_stops`, `fare`) and `stops.csv`
+      (`is_signal_stop`; `dwell` guaranteed present).
 
 ---
 
-## 6. Backward-compatibility guarantees
+## 7. Backward-compatibility guarantees
 
-- All pre-existing endpoints, request shapes, and response keys still work.
-- Old uploads sending `fare: 0` still validate (stored as `0`).
-- Internal column names for dwell/signal data are unchanged; only API-level
-  terminology/output was updated.
-- No destructive database migration was performed — existing trips, routes,
-  stops, and vehicles are intact.
+- `routeType` is **optional** on upload — existing client versions keep working.
+- All previously existing `routes.csv` / `stops.csv` columns are unchanged; the
+  new columns are **appended**.
+- No database reset is required on the client side; the backend auto-migrates
+  (Alembic revision `0006` + a guarded startup column add).
+- Internal field names (`dwellSeconds`, `signalDelay`, `stopType`) are unchanged.

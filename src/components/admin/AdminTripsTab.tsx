@@ -200,6 +200,7 @@ export function AdminTripsTab({ onSessionExpired }: Props) {
               <TableHead>Route</TableHead>
               <TableHead className="hidden md:table-cell">Owner</TableHead>
               <TableHead className="hidden sm:table-cell">Vehicle</TableHead>
+              <TableHead className="hidden sm:table-cell">Route type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -207,7 +208,7 @@ export function AdminTripsTab({ onSessionExpired }: Props) {
           <TableBody>
             {loading && trips.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="h-28 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={7} className="h-28 text-center text-sm text-muted-foreground">
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" /> Loading trips…
                   </span>
@@ -216,7 +217,7 @@ export function AdminTripsTab({ onSessionExpired }: Props) {
             )}
             {!loading && trips.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} className="h-28 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={7} className="h-28 text-center text-sm text-muted-foreground">
                   No trips found.
                 </TableCell>
               </TableRow>
@@ -241,6 +242,9 @@ export function AdminTripsTab({ onSessionExpired }: Props) {
                   </TableCell>
                   <TableCell className="hidden text-sm sm:table-cell">
                     {trip.vehicleType || "—"}
+                  </TableCell>
+                  <TableCell className="hidden text-sm sm:table-cell">
+                    {trip.routeType || "—"}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="capitalize">

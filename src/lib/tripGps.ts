@@ -21,9 +21,7 @@ type GpsPointLike = Omit<GpsPoint, "record_type"> & { record_type?: string };
 /** Ensure every stored/uploaded GPS point has record_type. */
 export function normalizeGpsPoints(gps: GpsPointLike[]): GpsPoint[] {
   return gps.map((p) =>
-    p.record_type === "gps_point"
-      ? (p as GpsPoint)
-      : { ...p, record_type: "gps_point" as const },
+    p.record_type === "gps_point" ? (p as GpsPoint) : { ...p, record_type: "gps_point" as const },
   );
 }
 
@@ -43,9 +41,7 @@ export function appendGpsPoint(trip: Trip, fix: GpsFix, ts = Date.now()): Trip {
 }
 
 function nearestGpsByTime(gps: GpsPoint[], ts: number): GpsPoint {
-  return gps.reduce((best, p) =>
-    Math.abs(p.ts - ts) < Math.abs(best.ts - ts) ? p : best,
-  );
+  return gps.reduce((best, p) => (Math.abs(p.ts - ts) < Math.abs(best.ts - ts) ? p : best));
 }
 
 /** Resolve stop coordinates from stored values or the trip GPS track. */
@@ -86,9 +82,10 @@ export function backfillTripStops(trip: Trip): {
 }
 
 export type PreparedTrip = {
-  payload: Omit<Trip, "uploaded" | "vehicle"> & {
+  payload: Omit<Trip, "uploaded" | "vehicle" | "routeType"> & {
     vehicleType?: string;
     passengerCapacity?: number;
+    routeType?: string;
     status: "ongoing" | "completed";
   };
   repaired: Trip;
@@ -99,13 +96,12 @@ export type PreparedTrip = {
 export function prepareTripForUpload(trip: Trip): PreparedTrip {
   const { trip: repaired, filled } = backfillTripStops(trip);
   const stops = repaired.stops.filter(
-    (s): s is Stop & { lat: number; lng: number } =>
-      s.lat != null && s.lng != null,
+    (s): s is Stop & { lat: number; lng: number } => s.lat != null && s.lng != null,
   );
 
   const gps = normalizeGpsPoints(repaired.gps);
   const tripWithGps = { ...repaired, gps, stops };
-  const { uploaded: _uploaded, vehicle, ...rest } = tripWithGps;
+  const { uploaded: _uploaded, vehicle, routeType, ...rest } = tripWithGps;
   const skippedStops = repaired.stops.length - stops.length;
   return {
     payload: {
@@ -113,6 +109,7 @@ export function prepareTripForUpload(trip: Trip): PreparedTrip {
       status: tripWithGps.endedAt ? "completed" : "ongoing",
       vehicleType: vehicle?.code,
       passengerCapacity: vehicle?.capacity,
+      routeType: routeType?.code,
       stops,
     },
     repaired: tripWithGps,
@@ -134,8 +131,6 @@ export function prepareTripsForUpload(trips: Trip[]) {
 /** Apply coordinates from a new GPS point to stops that are still missing them. */
 export function backfillStopsFromPoint(stops: Stop[], point: GpsPoint): Stop[] {
   return stops.map((s) =>
-    s.lat == null || s.lng == null
-      ? { ...s, lat: point.lat, lng: point.lng }
-      : s,
+    s.lat == null || s.lng == null ? { ...s, lat: point.lat, lng: point.lng } : s,
   );
 }
